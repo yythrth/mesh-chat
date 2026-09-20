@@ -68,7 +68,7 @@ impl ChatRecord {
 /// per record.
 pub fn render_text(room: &str, transport: &str, records: &[ChatRecord]) -> String {
     let mut out = String::new();
-    out.push_str("Portable P2P Chat - session transcript\n");
+    out.push_str("Mesh Chat - session transcript\n");
     out.push_str(&format!("Room code : {room}\n"));
     out.push_str(&format!("Transport : {transport}\n"));
     out.push_str(&format!("Exported  : {}\n", fmt_full(crate::protocol::now_ts())));
