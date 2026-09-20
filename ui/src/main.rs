@@ -1,4 +1,4 @@
-// Portable P2P group chat - Windows front end.
+// Mesh Chat - Windows front end.
 //
 // No console window in release builds; the debug build keeps one so that
 // `println!`/panic output is visible while developing.

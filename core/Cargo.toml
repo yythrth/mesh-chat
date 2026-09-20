@@ -1,6 +1,6 @@
 [package]
 name = "chat-core"
-description = "Transport, crypto, mesh and file-transfer engine for the portable P2P chat client"
+description = "Transport, crypto, mesh and file-transfer engine for the Mesh chat client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

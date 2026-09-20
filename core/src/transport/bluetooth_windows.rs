@@ -34,7 +34,7 @@ use crate::{Error, Result};
 pub const RFCOMM_CHANNEL: u32 = 25;
 
 /// Service class UUID for this application. Kept as the canonical identifier
-/// of the "portable p2p chat" RFCOMM service; the room code carries the
+/// of the "Mesh chat" RFCOMM service; the room code carries the
 /// channel directly so no SDP lookup is performed by either side.
 pub const SERVICE_UUID: &str = "7f2d1c40-9c1e-4c4e-9b6a-2f1c4a8d5e01";
 
@@ -304,25 +304,41 @@ pub fn listen() -> Result<Arc<dyn Listener>> {
             )));
         }
 
-        // Prefer the well-known channel; fall back to whatever is free.
-        let mut bound = SockaddrBth::new(0, RFCOMM_CHANNEL);
-        let mut rc = ws::bind(
-            sock,
-            &bound as *const SockaddrBth as *const ws::SOCKADDR,
-            std::mem::size_of::<SockaddrBth>() as i32,
-        );
-        if rc == SOCKET_ERROR {
-            bound = SockaddrBth::new(0, BT_PORT_ANY);
-            rc = ws::bind(
-                sock,
-                &bound as *const SockaddrBth as *const ws::SOCKADDR,
-                std::mem::size_of::<SockaddrBth>() as i32,
-            );
+        let candidates: [(u64, u32); 4] = [
+            (0, RFCOMM_CHANNEL),
+            (radio, RFCOMM_CHANNEL),
+            (0, BT_PORT_ANY),
+            (radio, BT_PORT_ANY),
+        ];
+        let mut last_err: Option<io::Error> = None;
+        let mut bound_ok = false;
+        'attempts: for pass in 0..3 {
+            if pass > 0 {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            for &(addr, port) in &candidates {
+                let bound = SockaddrBth::new(addr, port);
+                let rc = ws::bind(
+                    sock,
+                    &bound as *const SockaddrBth as *const ws::SOCKADDR,
+                    std::mem::size_of::<SockaddrBth>() as i32,
+                );
+                if rc != SOCKET_ERROR {
+                    bound_ok = true;
+                    break 'attempts;
+                }
+                last_err = Some(last_error());
+            }
         }
-        if rc == SOCKET_ERROR {
-            let e = last_error();
+        if !bound_ok {
+            let e = last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, "bind failed"));
             ws::closesocket(sock);
-            return Err(Error::Io(e));
+            return Err(Error::Unsupported(format!(
+                "could not open a Bluetooth server socket ({e}). Make sure Bluetooth is switched on, \
+                 the \"Bluetooth Support Service\" is running (services.msc), and the adapter supports \
+                 classic RFCOMM/SPP - some Bluetooth LE-only USB dongles do not. If Bluetooth was just \
+                 turned on, wait a few seconds and try again."
+            )));
         }
 
         // Ask the stack which channel we actually got.

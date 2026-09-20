@@ -1,23 +1,23 @@
-// User interface for the portable P2P chat client.
+// User interface for the Mesh chat client.
 //
-// Visual direction: a field instrument. The room code is the one loud element
-// on the screen - it is the thing people read out loud to each other - so it
-// gets a plate of its own in a monospaced face. Everything else stays quiet:
-// one signal colour for "link established", amber for "waiting on a human",
-// red for "failed", and no decoration that does not report state.
+// Layout: a persistent dark sidebar (identity, connection mode, room
+// controls, pending requests, peers) next to a conversation pane, rather
+// than switching between separate full-screen steps. The sidebar's room
+// controls and peer/request lists are always present; they are simply
+// empty until a room exists.
 
-import { LineEdit, ListView } from "std-widgets.slint";
+import { LineEdit, ListView, Palette } from "std-widgets.slint";
 
 global Theme {
-    out property <color> base: #E6EBEF;
-    out property <color> surface: #FFFFFF;
-    out property <color> plate: #131C24;
-    out property <color> ink: #101820;
-    out property <color> muted: #5D6A76;
-    out property <color> line: #C6D0D9;
-    out property <color> signal: #12664F;
-    out property <color> waiting: #8A5A00;
-    out property <color> danger: #9B2C2C;
+    out property <color> base: #0B0C0F;      // window background
+    out property <color> surface: #111318;   // sidebar / panel background
+    out property <color> raised: #1B1E24;    // room-code plate, cards
+    out property <color> ink: #E7ECF2;       // primary text
+    out property <color> muted: #8A93A0;     // secondary text
+    out property <color> line: #262B33;      // borders
+    out property <color> signal: #1E9E74;    // connected / primary action
+    out property <color> waiting: #D9A441;   // amber - waiting on a human
+    out property <color> danger: #E5484D;    // failed / error
     out property <string> mono: "Consolas";
 }
 
@@ -59,14 +59,14 @@ component ActionButton inherits Rectangle {
 
     height: 32px;
     min-width: 96px;
-    border-radius: 3px;
+    border-radius: 4px;
     border-width: 1px;
     border-color: root.active ? (root.primary ? Theme.signal : Theme.line) : Theme.line;
     background: !root.active
-        ? Theme.base
+        ? Theme.surface
         : root.primary
-            ? (ta.has-hover ? Theme.signal.darker(0.2) : Theme.signal)
-            : (ta.has-hover ? Theme.base : (root.quiet ? transparent : Theme.surface));
+            ? (ta.has-hover ? Theme.signal.darker(0.15) : Theme.signal)
+            : (ta.has-hover ? Theme.raised : (root.quiet ? transparent : Theme.surface));
 
     ta := TouchArea {
         mouse-cursor: root.active ? MouseCursor.pointer : MouseCursor.default;
@@ -82,21 +82,22 @@ component ActionButton inherits Rectangle {
         vertical-alignment: center;
         text: root.label;
         font-size: 13px;
-        color: !root.active ? Theme.muted : (root.primary ? #FFFFFF : Theme.ink);
+        color: !root.active ? Theme.muted : (root.primary ? #08120D : Theme.ink);
     }
 }
 
-component ModeTab inherits Rectangle {
+// Top navigation tab for the connection mode (LAN / Bluetooth): plain text
+// that gets a raised pill behind it once selected, underline-bar style.
+component NavTab inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
     callback clicked();
 
-    height: 32px;
-    border-width: 1px;
-    border-color: root.selected ? Theme.plate : Theme.line;
-    background: root.selected ? Theme.plate : Theme.surface;
+    height: 30px;
+    border-radius: 15px;
+    background: root.selected ? Theme.raised : (ta.has-hover ? Theme.surface : transparent);
 
-    TouchArea {
+    ta := TouchArea {
         mouse-cursor: MouseCursor.pointer;
         clicked => { root.clicked(); }
     }
@@ -108,7 +109,7 @@ component ModeTab inherits Rectangle {
         vertical-alignment: center;
         text: root.label;
         font-size: 13px;
-        color: root.selected ? #FFFFFF : Theme.ink;
+        color: root.selected ? Theme.ink : Theme.muted;
     }
 }
 
@@ -124,24 +125,27 @@ component StatusDot inherits Rectangle {
             : Theme.danger;
 }
 
-component Field inherits VerticalLayout {
-    in property <string> label;
-    spacing: 4px;
-    Text {
-        text: root.label;
-        font-size: 12px;
-        color: Theme.muted;
-    }
-    @children
+component SectionLabel inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Theme.muted;
+    letter-spacing: 0.5px;
 }
 
 export component AppWindow inherits Window {
-    title: "Portable P2P Chat";
+    title: "Mesh-Chat";
     background: Theme.base;
     preferred-width: 1000px;
     preferred-height: 680px;
     min-width: 860px;
     min-height: 600px;
+
+    // Force every std-widgets control (LineEdit, ListView, ...) into its
+    // dark variant so they don't render their default light styling
+    // against this window's dark background.
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
 
     // --- state driven from Rust -----------------------------------------
     in-out property <string> screen: "setup";      // "setup" | "room"
@@ -189,302 +193,245 @@ export component AppWindow inherits Window {
     callback respond_offer(string, bool);
 
     VerticalLayout {
-        // ---------------- header ----------------
+        // ---------------- title + mode tabs ----------------
         Rectangle {
-            height: 54px;
-            background: Theme.plate;
-            HorizontalLayout {
+            background: Theme.surface;
+            border-width: 0px;
+            VerticalLayout {
                 padding-left: 18px;
                 padding-right: 18px;
-                spacing: 12px;
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: "Portable P2P Chat";
-                        color: #FFFFFF;
-                        font-size: 16px;
-                        font-weight: 600;
+                padding-top: 10px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "Mesh-Chat";
+                            color: Theme.ink;
+                            font-size: 16px;
+                            font-weight: 600;
+                        }
                     }
-                    Text {
-                        text: root.screen == "room"
-                            ? (root.is_host ? "Hosting over " + root.transport_label : "Joined over " + root.transport_label)
-                            : "Direct peer to peer. No server, no discovery, no history kept anywhere.";
-                        color: #9FB0BD;
-                        font-size: 11px;
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: "your key " + root.my_fingerprint;
-                        color: #9FB0BD;
-                        font-size: 11px;
-                        font-family: Theme.mono;
-                        horizontal-alignment: right;
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "your key " + root.my_fingerprint;
+                            color: Theme.muted;
+                            font-size: 11px;
+                            font-family: Theme.mono;
+                            horizontal-alignment: right;
+                        }
                     }
                 }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    NavTab {
+                        label: "LAN (direct TCP)";
+                        width: 150px;
+                        selected: root.mode == "LAN";
+                        clicked => {
+                            if (root.screen == "setup") { root.mode = "LAN"; }
+                        }
+                    }
+                    NavTab {
+                        label: "Bluetooth (RFCOMM)";
+                        width: 165px;
+                        selected: root.mode == "Bluetooth";
+                        clicked => {
+                            if (root.screen == "setup") { root.mode = "Bluetooth"; }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.line; }
             }
         }
 
-        // ---------------- setup screen ----------------
-        if root.screen == "setup": Rectangle {
+        // ---------------- body: sidebar + conversation ----------------
+        HorizontalLayout {
             vertical-stretch: 1;
-            HorizontalLayout {
-                alignment: center;
-                VerticalLayout {
-                    alignment: center;
-                    width: 720px;
-                    spacing: 18px;
 
-                    Text {
-                        text: "Choose how the two machines will reach each other";
-                        font-size: 20px;
-                        color: Theme.ink;
-                    }
+            // -------- sidebar --------
+            Rectangle {
+                width: 300px;
+                background: Theme.surface;
 
-                    HorizontalLayout {
-                        spacing: 24px;
-                        Field {
-                            label: "Display name";
-                            width: 300px;
+                ScrollableSidebar := Flickable {
+                    viewport-width: parent.width;
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 16px;
+
+                        // --- identity ---
+                        VerticalLayout {
+                            spacing: 6px;
+                            SectionLabel { text: "Your display name"; }
                             LineEdit {
                                 placeholder-text: "e.g. Priya";
                                 text <=> root.display_name;
+                                enabled: root.screen == "setup";
                             }
                         }
-                        Field {
-                            label: "Connection mode";
-                            HorizontalLayout {
-                                spacing: 0px;
-                                ModeTab {
-                                    label: "LAN (Wi-Fi / Ethernet)";
-                                    width: 180px;
-                                    selected: root.mode == "LAN";
-                                    clicked => { root.mode = "LAN"; }
-                                }
-                                ModeTab {
-                                    label: "Bluetooth";
-                                    width: 130px;
-                                    selected: root.mode == "Bluetooth";
-                                    clicked => { root.mode = "Bluetooth"; }
-                                }
-                            }
-                        }
-                    }
 
-                    Rectangle { height: 1px; background: Theme.line; }
+                        // --- host/join controls, or active room info ---
+                        if root.screen == "setup": VerticalLayout {
+                            spacing: 12px;
 
-                    HorizontalLayout {
-                        spacing: 24px;
-
-                        Rectangle {
-                            background: Theme.surface;
-                            border-width: 1px;
-                            border-color: Theme.line;
-                            border-radius: 4px;
                             VerticalLayout {
-                                padding: 18px;
-                                spacing: 10px;
+                                spacing: 6px;
+                                SectionLabel { text: "Host a room"; }
                                 Text {
-                                    text: "Host a room";
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                    color: Theme.ink;
-                                }
-                                Text {
-                                    text: "You get a short code to pass on. Every joiner has to be approved by you before anything connects.";
+                                    text: "You get a short code to pass on. Every joiner needs your approval.";
                                     wrap: word-wrap;
-                                    font-size: 12px;
+                                    font-size: 11px;
                                     color: Theme.muted;
                                 }
-                                Rectangle { vertical-stretch: 1; }
                                 ActionButton {
-                                    label: "Create the room";
-                                    primary: true;
+                                    label: "Host a Room";
                                     active: !root.busy;
                                     clicked => { root.host_room(); }
                                 }
                             }
-                        }
 
-                        Rectangle {
-                            background: Theme.surface;
-                            border-width: 1px;
-                            border-color: Theme.line;
-                            border-radius: 4px;
+                            Rectangle { height: 1px; background: Theme.line; }
+
                             VerticalLayout {
-                                padding: 18px;
-                                spacing: 10px;
-                                Text {
-                                    text: "Join a room";
-                                    font-size: 15px;
-                                    font-weight: 600;
-                                    color: Theme.ink;
-                                }
-                                Text {
-                                    text: "Type the code exactly as the host read it out. Dashes and case do not matter.";
-                                    wrap: word-wrap;
-                                    font-size: 12px;
-                                    color: Theme.muted;
-                                }
+                                spacing: 6px;
+                                SectionLabel { text: "Join with room code"; }
                                 LineEdit {
                                     placeholder-text: "L-XXXXX-XXXXX";
                                     text <=> root.join_code;
                                     accepted => { root.join_room(); }
                                 }
                                 ActionButton {
-                                    label: "Request to join";
+                                    label: "Request to Join";
                                     active: !root.busy;
                                     clicked => { root.join_room(); }
                                 }
                             }
-                        }
-                    }
 
-                    if root.error_line != "": Text {
-                        text: root.error_line;
-                        color: Theme.danger;
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
-                }
-            }
-        }
-
-        // ---------------- room screen ----------------
-        if root.screen == "room": HorizontalLayout {
-            vertical-stretch: 1;
-
-            // -------- left column: room, requests, peers --------
-            Rectangle {
-                width: 320px;
-                background: Theme.surface;
-                border-width: 1px;
-                border-color: Theme.line;
-
-                VerticalLayout {
-                    padding: 14px;
-                    spacing: 14px;
-
-                    if root.is_host: VerticalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "Room code";
-                            font-size: 12px;
-                            color: Theme.muted;
-                        }
-                        Rectangle {
-                            height: 58px;
-                            background: Theme.plate;
-                            border-radius: 4px;
-                            Text {
-                                width: 100%;
-                                height: 100%;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                text: root.room_code;
-                                font-family: Theme.mono;
-                                font-size: 21px;
-                                letter-spacing: 2px;
-                                color: #FFFFFF;
+                            if root.error_line != "": Text {
+                                text: root.error_line;
+                                color: Theme.danger;
+                                font-size: 11px;
+                                wrap: word-wrap;
                             }
                         }
-                        HorizontalLayout {
+
+                        if root.screen == "room": VerticalLayout {
                             spacing: 8px;
-                            ActionButton {
-                                label: "Copy code";
-                                clicked => { root.copy_code(); }
-                            }
-                            ActionButton {
-                                label: "Reopen joining";
-                                quiet: true;
-                                clicked => { root.reopen_joining(); }
-                            }
-                        }
-                        Text {
-                            text: root.expiry_note;
-                            font-size: 11px;
-                            color: Theme.muted;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: "listening on " + root.room_addr;
-                            font-size: 11px;
-                            font-family: Theme.mono;
-                            color: Theme.muted;
-                        }
-                    }
+                            SectionLabel { text: root.is_host ? "Room code" : "Joined via " + root.transport_label; }
 
-                    if root.requests.length > 0: VerticalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: "Waiting for your decision";
-                            font-size: 12px;
-                            color: Theme.waiting;
-                        }
-                        for r in root.requests: Rectangle {
-                            background: #FFF8EC;
-                            border-width: 1px;
-                            border-color: #E3C489;
-                            border-radius: 4px;
-                            VerticalLayout {
-                                padding: 10px;
-                                spacing: 6px;
+                            Rectangle {
+                                height: 52px;
+                                background: Theme.raised;
+                                border-radius: 4px;
                                 Text {
-                                    text: r.name;
-                                    font-size: 14px;
-                                    font-weight: 600;
+                                    width: 100%;
+                                    height: 100%;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    text: root.room_code;
+                                    font-family: Theme.mono;
+                                    font-size: 19px;
+                                    letter-spacing: 2px;
                                     color: Theme.ink;
                                 }
-                                Text {
-                                    text: "from " + r.addr;
-                                    font-size: 11px;
-                                    font-family: Theme.mono;
-                                    color: Theme.muted;
+                            }
+
+                            if root.is_host: HorizontalLayout {
+                                spacing: 8px;
+                                ActionButton {
+                                    label: "Copy code";
+                                    clicked => { root.copy_code(); }
                                 }
-                                Text {
-                                    text: "key " + r.fingerprint;
-                                    font-size: 11px;
-                                    font-family: Theme.mono;
-                                    color: Theme.muted;
+                                ActionButton {
+                                    label: "Reopen joining";
+                                    quiet: true;
+                                    clicked => { root.reopen_joining(); }
                                 }
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    ActionButton {
-                                        label: "Accept";
-                                        primary: true;
-                                        clicked => { root.approve(r.req, true); }
+                            }
+                            if root.is_host && root.expiry_note != "": Text {
+                                text: root.expiry_note;
+                                font-size: 11px;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.line; }
+
+                        // --- pending requests ---
+                        VerticalLayout {
+                            spacing: 8px;
+                            SectionLabel { text: "Pending requests"; }
+                            if root.requests.length == 0: Text {
+                                text: "None";
+                                font-size: 12px;
+                                color: Theme.muted;
+                            }
+                            for r in root.requests: Rectangle {
+                                background: Theme.raised;
+                                border-radius: 4px;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 6px;
+                                    Text {
+                                        text: r.name;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: Theme.ink;
                                     }
-                                    ActionButton {
-                                        label: "Decline";
-                                        clicked => { root.approve(r.req, false); }
+                                    Text {
+                                        text: "from " + r.addr;
+                                        font-size: 10px;
+                                        font-family: Theme.mono;
+                                        color: Theme.muted;
+                                    }
+                                    Text {
+                                        text: "key " + r.fingerprint;
+                                        font-size: 10px;
+                                        font-family: Theme.mono;
+                                        color: Theme.muted;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        ActionButton {
+                                            label: "Accept";
+                                            primary: true;
+                                            clicked => { root.approve(r.req, true); }
+                                        }
+                                        ActionButton {
+                                            label: "Decline";
+                                            clicked => { root.approve(r.req, false); }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    VerticalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "People in this room";
-                            font-size: 12px;
-                            color: Theme.muted;
-                        }
-                        if root.peers.length == 0: Text {
-                            text: root.is_host
-                                ? "Nobody yet. Share the code above."
-                                : "Connecting...";
-                            font-size: 12px;
-                            color: Theme.muted;
-                            wrap: word-wrap;
-                        }
-                        for p in root.peers: Rectangle {
-                            height: peerlay.preferred-height;
-                            peerlay := VerticalLayout {
-                                padding-top: 5px;
-                                padding-bottom: 5px;
+                        Rectangle { height: 1px; background: Theme.line; }
+
+                        // --- peers ---
+                        VerticalLayout {
+                            spacing: 6px;
+                            SectionLabel { text: "Peers"; }
+                            if root.peers.length == 0: Text {
+                                text: root.screen == "room"
+                                    ? (root.is_host ? "Nobody yet. Share the code above." : "Connecting...")
+                                    : "Not connected.";
+                                font-size: 12px;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                            for p in root.peers: VerticalLayout {
+                                padding-top: 4px;
+                                padding-bottom: 4px;
                                 spacing: 2px;
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -505,7 +452,7 @@ export component AppWindow inherits Window {
                                         vertical-alignment: bottom;
                                     }
                                 }
-                                Text {
+                                if p.detail != "": Text {
                                     text: p.detail;
                                     font-size: 10px;
                                     font-family: Theme.mono;
@@ -514,20 +461,55 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                    }
 
-                    Rectangle { vertical-stretch: 1; }
+                        Rectangle { vertical-stretch: 1; }
 
-                    ActionButton {
-                        label: "Leave the room";
-                        clicked => { root.leave_room(); }
+                        // --- transcript / file actions, always visible ---
+                        Rectangle { height: 1px; background: Theme.line; }
+                        VerticalLayout {
+                            spacing: 8px;
+                            ActionButton {
+                                label: "Download Chat History";
+                                clicked => { root.export_history(); }
+                            }
+                            ActionButton {
+                                label: "Send File";
+                                active: root.screen == "room";
+                                clicked => { root.send_file(); }
+                            }
+                            if root.screen == "room": ActionButton {
+                                label: "Leave the room";
+                                quiet: true;
+                                clicked => { root.leave_room(); }
+                            }
+                        }
                     }
                 }
             }
 
-            // -------- right column: conversation --------
+            // -------- conversation pane --------
             VerticalLayout {
                 horizontal-stretch: 1;
+
+                VerticalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-top: 14px;
+                    padding-bottom: 6px;
+                    spacing: 2px;
+                    Text {
+                        text: "Conversation";
+                        font-size: 15px;
+                        font-weight: 600;
+                        color: Theme.ink;
+                    }
+                    Text {
+                        text: "Messages and files are sent separately to each peer over its own encrypted channel.";
+                        font-size: 11px;
+                        color: Theme.muted;
+                        wrap: word-wrap;
+                    }
+                }
 
                 chat_list := ListView {
                     vertical-stretch: 1;
@@ -542,35 +524,35 @@ export component AppWindow inherits Window {
                     }
 
                     for m in root.messages: Rectangle {
-                        background: m.mine ? #EDF3F1 : transparent;
+                        background: m.mine ? Theme.raised : transparent;
                         VerticalLayout {
-                            padding-left: 16px;
-                            padding-right: 16px;
-                            padding-top: 7px;
-                            padding-bottom: 7px;
-                            spacing: 2px;
+                            padding-left: 18px;
+                            padding-right: 18px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            spacing: 1px;
                             if !m.system: HorizontalLayout {
-                                spacing: 8px;
+                                spacing: 6px;
                                 alignment: start;
                                 Text {
-                                    text: m.who;
+                                    text: m.who + ":";
                                     font-size: 13px;
                                     font-weight: 600;
                                     color: m.mine ? Theme.signal : Theme.ink;
                                 }
                                 Text {
-                                    text: m.time;
-                                    font-size: 11px;
-                                    font-family: Theme.mono;
-                                    color: Theme.muted;
-                                    vertical-alignment: bottom;
+                                    text: m.body;
+                                    font-size: 13px;
+                                    color: Theme.ink;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
                                 }
                             }
-                            Text {
+                            if m.system: Text {
                                 text: m.body;
-                                font-size: m.system ? 12px : 14px;
-                                font-italic: m.system;
-                                color: m.system ? Theme.muted : Theme.ink;
+                                font-size: 12px;
+                                font-italic: true;
+                                color: Theme.muted;
                                 wrap: word-wrap;
                             }
                         }
@@ -579,8 +561,6 @@ export component AppWindow inherits Window {
 
                 if root.transfers.length > 0: Rectangle {
                     background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.line;
                     VerticalLayout {
                         padding: 10px;
                         spacing: 6px;
@@ -603,7 +583,7 @@ export component AppWindow inherits Window {
                             }
                             Rectangle {
                                 height: 4px;
-                                background: Theme.base;
+                                background: Theme.raised;
                                 border-radius: 2px;
                                 Rectangle {
                                     x: 0;
@@ -618,9 +598,7 @@ export component AppWindow inherits Window {
                 }
 
                 if root.offer_id != "": Rectangle {
-                    background: #FFF8EC;
-                    border-width: 1px;
-                    border-color: #E3C489;
+                    background: Theme.surface;
                     HorizontalLayout {
                         padding: 12px;
                         spacing: 12px;
@@ -657,16 +635,15 @@ export component AppWindow inherits Window {
                 }
 
                 Rectangle {
-                    height: 66px;
+                    height: 56px;
                     background: Theme.surface;
-                    border-width: 1px;
-                    border-color: Theme.line;
                     HorizontalLayout {
-                        padding: 12px;
+                        padding: 10px;
                         spacing: 8px;
                         LineEdit {
                             horizontal-stretch: 1;
-                            placeholder-text: "Write a message";
+                            placeholder-text: root.screen == "room" ? "Write a message" : "Host or join a room to start chatting";
+                            enabled: root.screen == "room";
                             text <=> root.draft;
                             accepted => { root.send_message(); }
                         }
@@ -674,17 +651,8 @@ export component AppWindow inherits Window {
                             label: "Send";
                             primary: true;
                             min-width: 78px;
+                            active: root.screen == "room";
                             clicked => { root.send_message(); }
-                        }
-                        ActionButton {
-                            label: "Send file";
-                            min-width: 88px;
-                            clicked => { root.send_file(); }
-                        }
-                        ActionButton {
-                            label: "Download chat history";
-                            min-width: 168px;
-                            clicked => { root.export_history(); }
                         }
                     }
                 }
@@ -694,7 +662,7 @@ export component AppWindow inherits Window {
         // ---------------- status bar ----------------
         Rectangle {
             height: 26px;
-            background: Theme.plate;
+            background: Theme.surface;
             HorizontalLayout {
                 padding-left: 18px;
                 padding-right: 18px;
@@ -704,7 +672,7 @@ export component AppWindow inherits Window {
                     Text {
                         text: root.status_line;
                         font-size: 11px;
-                        color: #9FB0BD;
+                        color: Theme.muted;
                         overflow: elide;
                     }
                 }
@@ -714,7 +682,7 @@ export component AppWindow inherits Window {
                     Text {
                         text: root.screen == "room" ? root.transport_label + " · end to end encrypted (Noise XX)" : "";
                         font-size: 11px;
-                        color: #9FB0BD;
+                        color: Theme.muted;
                     }
                 }
             }

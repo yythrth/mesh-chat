@@ -1,4 +1,4 @@
-//! Core engine for the portable P2P group-chat client.
+//! Core engine for the Mesh group-chat client.
 //!
 //! Everything that is not user interface lives here:
 //!
