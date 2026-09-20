@@ -1,4 +1,4 @@
-# Mesh Chat
+# Portable P2P Group Chat
 
 A single-file Windows chat client for small groups who are in the same place.
 Two or more people run `chat.exe`, one of them reads a short code out loud, and
@@ -150,8 +150,8 @@ rustup default stable-x86_64-pc-windows-msvc
 ### Build
 
 ```powershell
-git clone <your-fork-url> mesh-chat
-cd mesh-chat
+git clone <your-fork-url> p2pchat
+cd p2pchat
 cargo build --release
 ```
 
@@ -255,7 +255,7 @@ sees the filename and size and chooses **Save file as...** or **Decline**.
 with a `.json` extension for structured output, or anything else for plain text:
 
 ```
-Mesh Chat - session transcript
+Portable P2P Chat - session transcript
 Room code : L-4KQ7M-2PX9C
 Transport : LAN
 Exported  : 2026-09-19 15:04:22
@@ -348,7 +348,7 @@ firewall on the *host*.
 Add the rule manually from an elevated PowerShell on the host:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Mesh Chat" `
+New-NetFirewallRule -DisplayName "Portable P2P Chat" `
   -Direction Inbound -Program "C:\path\to\chat.exe" `
   -Action Allow -Profile Private
 ```
@@ -376,7 +376,7 @@ development with C++* workload and open a fresh terminal.
 ## Project layout
 
 ```
-mesh-chat/
+p2pchat/
 ├── Cargo.toml              workspace + release profile (size-optimised)
 ├── .cargo/config.toml      static CRT for the MSVC targets
 ├── core/                   the engine — platform independent, fully tested

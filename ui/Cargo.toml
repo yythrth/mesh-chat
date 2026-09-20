@@ -1,6 +1,6 @@
 [package]
 name = "chat"
-description = "Mesh Chat client for Windows (LAN + Bluetooth)"
+description = "Portable P2P group chat client for Windows (LAN + Bluetooth)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
