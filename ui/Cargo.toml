@@ -1,0 +1,33 @@
+[package]
+name = "chat"
+description = "Portable P2P group chat client for Windows (LAN + Bluetooth)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "chat"
+path = "src/main.rs"
+
+[dependencies]
+chat-core = { path = "../core" }
+
+# Slint with the software renderer + winit backend only: no Skia, no Qt, no
+# extra DLLs to ship next to the executable.
+slint = { version = "1.8", default-features = false, features = [
+    "compat-1-2",
+    "std",
+    "backend-winit",
+    "renderer-software",
+] }
+
+# Native Win32 file dialogs (no extra runtime).
+rfd = { version = "0.15", default-features = false, features = [
+    "common-controls-v6",
+] }
+
+# Clipboard for "copy room code".
+arboard = { version = "3", default-features = false }
+
+[build-dependencies]
+slint-build = "1.8"

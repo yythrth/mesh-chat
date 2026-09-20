@@ -1,0 +1,723 @@
+// User interface for the portable P2P chat client.
+//
+// Visual direction: a field instrument. The room code is the one loud element
+// on the screen - it is the thing people read out loud to each other - so it
+// gets a plate of its own in a monospaced face. Everything else stays quiet:
+// one signal colour for "link established", amber for "waiting on a human",
+// red for "failed", and no decoration that does not report state.
+
+import { LineEdit, ListView } from "std-widgets.slint";
+
+global Theme {
+    out property <color> base: #E6EBEF;
+    out property <color> surface: #FFFFFF;
+    out property <color> plate: #131C24;
+    out property <color> ink: #101820;
+    out property <color> muted: #5D6A76;
+    out property <color> line: #C6D0D9;
+    out property <color> signal: #12664F;
+    out property <color> waiting: #8A5A00;
+    out property <color> danger: #9B2C2C;
+    out property <string> mono: "Consolas";
+}
+
+export struct MessageRow {
+    who: string,
+    time: string,
+    body: string,
+    mine: bool,
+    system: bool,
+}
+
+export struct PeerRow {
+    id: string,
+    name: string,
+    status: string,
+    detail: string,
+}
+
+export struct RequestRow {
+    req: string,
+    name: string,
+    addr: string,
+    fingerprint: string,
+}
+
+export struct TransferRow {
+    id: string,
+    label: string,
+    progress: float,
+    state: string,
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> quiet: false;
+    in property <bool> active: true;
+    callback clicked();
+
+    height: 32px;
+    min-width: 96px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.active ? (root.primary ? Theme.signal : Theme.line) : Theme.line;
+    background: !root.active
+        ? Theme.base
+        : root.primary
+            ? (ta.has-hover ? Theme.signal.darker(0.2) : Theme.signal)
+            : (ta.has-hover ? Theme.base : (root.quiet ? transparent : Theme.surface));
+
+    ta := TouchArea {
+        mouse-cursor: root.active ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.active) { root.clicked(); }
+        }
+    }
+
+    Text {
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.label;
+        font-size: 13px;
+        color: !root.active ? Theme.muted : (root.primary ? #FFFFFF : Theme.ink);
+    }
+}
+
+component ModeTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 32px;
+    border-width: 1px;
+    border-color: root.selected ? Theme.plate : Theme.line;
+    background: root.selected ? Theme.plate : Theme.surface;
+
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.label;
+        font-size: 13px;
+        color: root.selected ? #FFFFFF : Theme.ink;
+    }
+}
+
+component StatusDot inherits Rectangle {
+    in property <string> status;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: root.status == "Connected"
+        ? Theme.signal
+        : root.status == "Connecting"
+            ? Theme.waiting
+            : Theme.danger;
+}
+
+component Field inherits VerticalLayout {
+    in property <string> label;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: Theme.muted;
+    }
+    @children
+}
+
+export component AppWindow inherits Window {
+    title: "Portable P2P Chat";
+    background: Theme.base;
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    min-width: 860px;
+    min-height: 600px;
+
+    // --- state driven from Rust -----------------------------------------
+    in-out property <string> screen: "setup";      // "setup" | "room"
+    in-out property <string> display_name: "";
+    in-out property <string> mode: "LAN";          // "LAN" | "Bluetooth"
+    in-out property <string> join_code: "";
+    in-out property <string> draft: "";
+
+    in property <bool> is_host: false;
+    in property <string> room_code: "";
+    in property <string> room_addr: "";
+    in property <string> transport_label: "";
+    in property <string> my_fingerprint: "";
+    in property <string> status_line: "";
+    in property <string> error_line: "";
+    in property <string> expiry_note: "";
+    in property <bool> busy: false;
+
+    in property <[MessageRow]> messages;
+    in property <[PeerRow]> peers;
+    in property <[RequestRow]> requests;
+    in property <[TransferRow]> transfers;
+
+    in property <string> offer_id: "";
+    in property <string> offer_text: "";
+
+    // Bumped from Rust whenever the transcript gains a line. The ListView
+    // lives inside an `if` block further down, and Slint does not let a
+    // root-level function reach into an id declared inside a conditional -
+    // so instead of calling in, we let the list itself notice this counter
+    // change and scroll itself. See the `changed _tick` handler on
+    // `chat_list` below.
+    in property <int> scroll_tick: 0;
+
+    // --- actions handled in Rust ----------------------------------------
+    callback host_room();
+    callback join_room();
+    callback approve(string, bool);
+    callback send_message();
+    callback send_file();
+    callback export_history();
+    callback copy_code();
+    callback leave_room();
+    callback reopen_joining();
+    callback respond_offer(string, bool);
+
+    VerticalLayout {
+        // ---------------- header ----------------
+        Rectangle {
+            height: 54px;
+            background: Theme.plate;
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Portable P2P Chat";
+                        color: #FFFFFF;
+                        font-size: 16px;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: root.screen == "room"
+                            ? (root.is_host ? "Hosting over " + root.transport_label : "Joined over " + root.transport_label)
+                            : "Direct peer to peer. No server, no discovery, no history kept anywhere.";
+                        color: #9FB0BD;
+                        font-size: 11px;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "your key " + root.my_fingerprint;
+                        color: #9FB0BD;
+                        font-size: 11px;
+                        font-family: Theme.mono;
+                        horizontal-alignment: right;
+                    }
+                }
+            }
+        }
+
+        // ---------------- setup screen ----------------
+        if root.screen == "setup": Rectangle {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    width: 720px;
+                    spacing: 18px;
+
+                    Text {
+                        text: "Choose how the two machines will reach each other";
+                        font-size: 20px;
+                        color: Theme.ink;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 24px;
+                        Field {
+                            label: "Display name";
+                            width: 300px;
+                            LineEdit {
+                                placeholder-text: "e.g. Priya";
+                                text <=> root.display_name;
+                            }
+                        }
+                        Field {
+                            label: "Connection mode";
+                            HorizontalLayout {
+                                spacing: 0px;
+                                ModeTab {
+                                    label: "LAN (Wi-Fi / Ethernet)";
+                                    width: 180px;
+                                    selected: root.mode == "LAN";
+                                    clicked => { root.mode = "LAN"; }
+                                }
+                                ModeTab {
+                                    label: "Bluetooth";
+                                    width: 130px;
+                                    selected: root.mode == "Bluetooth";
+                                    clicked => { root.mode = "Bluetooth"; }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.line; }
+
+                    HorizontalLayout {
+                        spacing: 24px;
+
+                        Rectangle {
+                            background: Theme.surface;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            border-radius: 4px;
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 10px;
+                                Text {
+                                    text: "Host a room";
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    color: Theme.ink;
+                                }
+                                Text {
+                                    text: "You get a short code to pass on. Every joiner has to be approved by you before anything connects.";
+                                    wrap: word-wrap;
+                                    font-size: 12px;
+                                    color: Theme.muted;
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                                ActionButton {
+                                    label: "Create the room";
+                                    primary: true;
+                                    active: !root.busy;
+                                    clicked => { root.host_room(); }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            background: Theme.surface;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            border-radius: 4px;
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 10px;
+                                Text {
+                                    text: "Join a room";
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    color: Theme.ink;
+                                }
+                                Text {
+                                    text: "Type the code exactly as the host read it out. Dashes and case do not matter.";
+                                    wrap: word-wrap;
+                                    font-size: 12px;
+                                    color: Theme.muted;
+                                }
+                                LineEdit {
+                                    placeholder-text: "L-XXXXX-XXXXX";
+                                    text <=> root.join_code;
+                                    accepted => { root.join_room(); }
+                                }
+                                ActionButton {
+                                    label: "Request to join";
+                                    active: !root.busy;
+                                    clicked => { root.join_room(); }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.error_line != "": Text {
+                        text: root.error_line;
+                        color: Theme.danger;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        // ---------------- room screen ----------------
+        if root.screen == "room": HorizontalLayout {
+            vertical-stretch: 1;
+
+            // -------- left column: room, requests, peers --------
+            Rectangle {
+                width: 320px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 14px;
+
+                    if root.is_host: VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Room code";
+                            font-size: 12px;
+                            color: Theme.muted;
+                        }
+                        Rectangle {
+                            height: 58px;
+                            background: Theme.plate;
+                            border-radius: 4px;
+                            Text {
+                                width: 100%;
+                                height: 100%;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                text: root.room_code;
+                                font-family: Theme.mono;
+                                font-size: 21px;
+                                letter-spacing: 2px;
+                                color: #FFFFFF;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            ActionButton {
+                                label: "Copy code";
+                                clicked => { root.copy_code(); }
+                            }
+                            ActionButton {
+                                label: "Reopen joining";
+                                quiet: true;
+                                clicked => { root.reopen_joining(); }
+                            }
+                        }
+                        Text {
+                            text: root.expiry_note;
+                            font-size: 11px;
+                            color: Theme.muted;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: "listening on " + root.room_addr;
+                            font-size: 11px;
+                            font-family: Theme.mono;
+                            color: Theme.muted;
+                        }
+                    }
+
+                    if root.requests.length > 0: VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Waiting for your decision";
+                            font-size: 12px;
+                            color: Theme.waiting;
+                        }
+                        for r in root.requests: Rectangle {
+                            background: #FFF8EC;
+                            border-width: 1px;
+                            border-color: #E3C489;
+                            border-radius: 4px;
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+                                Text {
+                                    text: r.name;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: Theme.ink;
+                                }
+                                Text {
+                                    text: "from " + r.addr;
+                                    font-size: 11px;
+                                    font-family: Theme.mono;
+                                    color: Theme.muted;
+                                }
+                                Text {
+                                    text: "key " + r.fingerprint;
+                                    font-size: 11px;
+                                    font-family: Theme.mono;
+                                    color: Theme.muted;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    ActionButton {
+                                        label: "Accept";
+                                        primary: true;
+                                        clicked => { root.approve(r.req, true); }
+                                    }
+                                    ActionButton {
+                                        label: "Decline";
+                                        clicked => { root.approve(r.req, false); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "People in this room";
+                            font-size: 12px;
+                            color: Theme.muted;
+                        }
+                        if root.peers.length == 0: Text {
+                            text: root.is_host
+                                ? "Nobody yet. Share the code above."
+                                : "Connecting...";
+                            font-size: 12px;
+                            color: Theme.muted;
+                            wrap: word-wrap;
+                        }
+                        for p in root.peers: Rectangle {
+                            height: peerlay.preferred-height;
+                            peerlay := VerticalLayout {
+                                padding-top: 5px;
+                                padding-bottom: 5px;
+                                spacing: 2px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        StatusDot { status: p.status; }
+                                    }
+                                    Text {
+                                        text: p.name;
+                                        font-size: 13px;
+                                        color: Theme.ink;
+                                    }
+                                    Text {
+                                        text: p.status;
+                                        font-size: 11px;
+                                        color: Theme.muted;
+                                        vertical-alignment: bottom;
+                                    }
+                                }
+                                Text {
+                                    text: p.detail;
+                                    font-size: 10px;
+                                    font-family: Theme.mono;
+                                    color: Theme.muted;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    ActionButton {
+                        label: "Leave the room";
+                        clicked => { root.leave_room(); }
+                    }
+                }
+            }
+
+            // -------- right column: conversation --------
+            VerticalLayout {
+                horizontal-stretch: 1;
+
+                chat_list := ListView {
+                    vertical-stretch: 1;
+
+                    // Same element as the id above the restriction: a local
+                    // property mirroring root's counter, watched with
+                    // `changed`, so the scroll happens inside chat_list's own
+                    // scope instead of being reached into from outside it.
+                    property <int> _tick: root.scroll_tick;
+                    changed _tick => {
+                        self.viewport-y = min(0px, self.visible-height - self.viewport-height);
+                    }
+
+                    for m in root.messages: Rectangle {
+                        background: m.mine ? #EDF3F1 : transparent;
+                        VerticalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            padding-top: 7px;
+                            padding-bottom: 7px;
+                            spacing: 2px;
+                            if !m.system: HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                Text {
+                                    text: m.who;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: m.mine ? Theme.signal : Theme.ink;
+                                }
+                                Text {
+                                    text: m.time;
+                                    font-size: 11px;
+                                    font-family: Theme.mono;
+                                    color: Theme.muted;
+                                    vertical-alignment: bottom;
+                                }
+                            }
+                            Text {
+                                text: m.body;
+                                font-size: m.system ? 12px : 14px;
+                                font-italic: m.system;
+                                color: m.system ? Theme.muted : Theme.ink;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                if root.transfers.length > 0: Rectangle {
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+                        for t in root.transfers: VerticalLayout {
+                            spacing: 3px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: t.label;
+                                    font-size: 12px;
+                                    color: Theme.ink;
+                                    overflow: elide;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: t.state;
+                                    font-size: 11px;
+                                    color: Theme.muted;
+                                }
+                            }
+                            Rectangle {
+                                height: 4px;
+                                background: Theme.base;
+                                border-radius: 2px;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * t.progress;
+                                    height: 100%;
+                                    border-radius: 2px;
+                                    background: Theme.signal;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.offer_id != "": Rectangle {
+                    background: #FFF8EC;
+                    border-width: 1px;
+                    border-color: #E3C489;
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: root.offer_text;
+                                font-size: 13px;
+                                color: Theme.ink;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: "Nothing is written until you choose where to save it, and nothing is ever opened for you.";
+                                font-size: 11px;
+                                color: Theme.muted;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            ActionButton {
+                                label: "Save file as...";
+                                primary: true;
+                                clicked => { root.respond_offer(root.offer_id, true); }
+                            }
+                            ActionButton {
+                                label: "Decline";
+                                clicked => { root.respond_offer(root.offer_id, false); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 66px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            placeholder-text: "Write a message";
+                            text <=> root.draft;
+                            accepted => { root.send_message(); }
+                        }
+                        ActionButton {
+                            label: "Send";
+                            primary: true;
+                            min-width: 78px;
+                            clicked => { root.send_message(); }
+                        }
+                        ActionButton {
+                            label: "Send file";
+                            min-width: 88px;
+                            clicked => { root.send_file(); }
+                        }
+                        ActionButton {
+                            label: "Download chat history";
+                            min-width: 168px;
+                            clicked => { root.export_history(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------------- status bar ----------------
+        Rectangle {
+            height: 26px;
+            background: Theme.plate;
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.status_line;
+                        font-size: 11px;
+                        color: #9FB0BD;
+                        overflow: elide;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.screen == "room" ? root.transport_label + " · end to end encrypted (Noise XX)" : "";
+                        font-size: 11px;
+                        color: #9FB0BD;
+                    }
+                }
+            }
+        }
+    }
+}

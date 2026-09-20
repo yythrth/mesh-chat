@@ -1,0 +1,11 @@
+# Statically link the Microsoft C runtime so the produced chat.exe is a single
+# portable file with no vcredist / companion DLL requirement.
+#
+# This only applies to the MSVC target, so `cargo test` on other platforms is
+# unaffected. If you deliberately want a dynamically linked CRT, delete this
+# file (or comment the rustflags line out).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

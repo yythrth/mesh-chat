@@ -1,0 +1,3 @@
+# Any recent stable Rust works; this just keeps everyone on the same channel.
+[toolchain]
+channel = "stable"
