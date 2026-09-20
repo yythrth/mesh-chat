@@ -1,0 +1,45 @@
+name: Build and release chat.exe
+
+# Runs only when you push a version tag (v0.1, v1.0, v1.1, ...). Push
+# commits to main as often as you like - nothing builds or releases until
+# you decide a version is ready and tag it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # required so the workflow can create the release
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run the engine's test suite
+        run: cargo test -p chat-core
+
+      - name: Build the release binary
+        run: cargo build --release -p chat
+
+      - name: Stage the executable
+        run: |
+          mkdir dist
+          copy target\release\chat.exe dist\chat.exe
+        shell: cmd
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Portable P2P Chat ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/chat.exe
