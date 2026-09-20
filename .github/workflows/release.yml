@@ -40,6 +40,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Portable P2P Chat ${{ github.ref_name }}
+          name: Mesh Chat ${{ github.ref_name }}
           generate_release_notes: true
           files: dist/chat.exe
