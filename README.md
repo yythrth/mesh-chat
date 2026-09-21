@@ -261,7 +261,7 @@ Transport : LAN
 Exported  : 2026-09-19 15:04:22
 ------------------------------------------------------------
 [2026-09-19 14:58:10] * Room opened over LAN with code L-4KQ7M-2PX9C
-[2026-09-19 14:59:02] Priya: are we all here?
+[2026-09-19 14:59:02] Alice: are we all here?
 [2026-09-19 14:59:11] Sam: yep
 ```
 

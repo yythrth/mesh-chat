@@ -294,78 +294,61 @@ impl Drop for BtListener {
 
 pub fn listen() -> Result<Arc<dyn Listener>> {
     wsa_init();
-    let radio = local_radio_address()?;
+
     unsafe {
         let sock = ws::socket(AF_BTH, SOCK_STREAM, BTHPROTO_RFCOMM);
+
         if sock == INVALID_SOCKET {
             return Err(Error::Unsupported(format!(
-                "could not create a Bluetooth socket ({}). The Microsoft Bluetooth stack is required.",
+                "could not create a Bluetooth socket ({})",
                 last_error()
             )));
         }
 
-        let candidates: [(u64, u32); 4] = [
-            (0, RFCOMM_CHANNEL),
-            (radio, RFCOMM_CHANNEL),
-            (0, BT_PORT_ANY),
-            (radio, BT_PORT_ANY),
-        ];
-        let mut last_err: Option<io::Error> = None;
-        let mut bound_ok = false;
-        'attempts: for pass in 0..3 {
-            if pass > 0 {
-                std::thread::sleep(Duration::from_millis(250));
-            }
-            for &(addr, port) in &candidates {
-                let bound = SockaddrBth::new(addr, port);
-                let rc = ws::bind(
-                    sock,
-                    &bound as *const SockaddrBth as *const ws::SOCKADDR,
-                    std::mem::size_of::<SockaddrBth>() as i32,
-                );
-                if rc != SOCKET_ERROR {
-                    bound_ok = true;
-                    break 'attempts;
-                }
-                last_err = Some(last_error());
-            }
-        }
-        if !bound_ok {
-            let e = last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, "bind failed"));
+        // Let Windows choose the RFCOMM channel.
+        // bt_addr = 0 means bind to the local Bluetooth radio.
+        let addr = SockaddrBth::new(0, BT_PORT_ANY);
+
+        if ws::bind(
+            sock,
+            &addr as *const SockaddrBth as *const ws::SOCKADDR,
+            std::mem::size_of::<SockaddrBth>() as i32,
+        ) == SOCKET_ERROR {
+            let e = last_error();
             ws::closesocket(sock);
+
             return Err(Error::Unsupported(format!(
-                "could not open a Bluetooth server socket ({e}). Make sure Bluetooth is switched on, \
-                 the \"Bluetooth Support Service\" is running (services.msc), and the adapter supports \
-                 classic RFCOMM/SPP - some Bluetooth LE-only USB dongles do not. If Bluetooth was just \
-                 turned on, wait a few seconds and try again."
+                "Bluetooth bind failed: {e}"
             )));
         }
 
-        // Ask the stack which channel we actually got.
-        let mut actual: SockaddrBth = SockaddrBth::new(0, 0);
+        // Ask Windows which RFCOMM channel it actually assigned.
+        let mut actual = SockaddrBth::new(0, 0);
         let mut len = std::mem::size_of::<SockaddrBth>() as i32;
-        let channel = if ws::getsockname(
+
+        if ws::getsockname(
             sock,
             &mut actual as *mut SockaddrBth as *mut ws::SOCKADDR,
             &mut len,
-        ) == 0
-            && actual.port != 0
-            && actual.port != BT_PORT_ANY
-        {
-            actual.port
-        } else {
-            RFCOMM_CHANNEL
-        };
+        ) == SOCKET_ERROR {
+            let e = last_error();
+            ws::closesocket(sock);
+
+            return Err(Error::Io(e));
+        }
+
+        let channel = actual.port;
 
         if ws::listen(sock, 8) == SOCKET_ERROR {
             let e = last_error();
             ws::closesocket(sock);
+
             return Err(Error::Io(e));
         }
 
         Ok(Arc::new(BtListener {
             sock,
-            dial: format!("{}:{}", format_addr(radio), channel),
+            dial: format!("{}:{}", format_addr(actual.bt_addr), channel),
             closed: AtomicBool::new(false),
         }) as Arc<dyn Listener>)
     }
